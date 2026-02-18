@@ -79,7 +79,7 @@ class OrderSchema(ma.SQLAlchemyAutoSchema):
     class Meta:
         model = Order
         load_instance = True
-        include_fk = True   # 👈 REQUIRED by your instructions
+        include_fk = True
 
     user_id = fields.Integer(required=True)
     order_date = fields.DateTime(dump_only=True)
