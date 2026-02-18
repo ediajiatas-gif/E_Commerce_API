@@ -55,11 +55,11 @@ class Order(Base):
 
 
 # Product model
-class Product(Base): 
+class Product(Base):
     __tablename__ = 'products'
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    price: Mapped[float] = mapped_column(Float, nullable=False)
+    id = mapped_column(Integer, primary_key=True)
+    product_name = mapped_column(String(120), unique=True, nullable=False)
+    price = mapped_column(Float, nullable=False)
     
     orders: Mapped[List["Order"]] = relationship("Order", secondary=order_product, back_populates="products")
 
@@ -74,6 +74,13 @@ class UserSchema(ma.SQLAlchemyAutoSchema):
     address = fields.String(required=True, validate=validate.Length(min=1, max=255))
     email = fields.Email(required=True)
 
+class ProductSchema(ma.SQLAlchemyAutoSchema):
+    class Meta:
+        model = Product
+        load_instance = True
+
+    product_name = fields.String(required=True, validate=validate.Length(min=1, max=120))
+    price = fields.Float(required=True, validate=validate.Range(min=0.01))
 
 class OrderSchema(ma.SQLAlchemyAutoSchema):
     class Meta:
@@ -83,16 +90,7 @@ class OrderSchema(ma.SQLAlchemyAutoSchema):
 
     user_id = fields.Integer(required=True)
     order_date = fields.DateTime(dump_only=True)
-
-
-class ProductSchema(ma.SQLAlchemyAutoSchema):
-    class Meta:
-        model = Product
-        load_instance = True
-
-    name = fields.String(required=True, validate=validate.Length(min=1, max=120))
-    price = fields.Float(required=True, validate=validate.Range(min=0.01))
-
+    products = ma.Nested(ProductSchema, many=True)
     
 # Instances of Schemas
 user_schema = UserSchema()
@@ -161,8 +159,14 @@ def update_user(id):
     if 'email' in user_data: 
         user.email = user_data['email']
     
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"message": "Duplicate value not allowed"}), 409
+
     return user_schema.jsonify(user), 200
+
     
 # DELETE route -- delets user by ID  
 @app.route('/users/<int:id>', methods=['DELETE'])
@@ -201,7 +205,7 @@ def create_product():
     try:
         product_data = product_schema.load(request.json)
         new_product = Product(
-            name=product_data['name'],
+            product_name=product_data['product_name'],
             price=product_data['price'],
         )
         db.session.add(new_product)
@@ -221,18 +225,25 @@ def update_product(id):
     
     if not product:
         return jsonify({"message": "Invalid product id"}), 404
+
     try: 
-        product_data = product_schema.load(request.json, partial=True)  # validates input only
+        product_data = product_schema.load(request.json, partial=True)
     except ValidationError as e:
         return jsonify(e.messages), 400
     
-    if 'name' in product_data:
-        product.name = product_data['name']
+    if 'product_name' in product_data:
+        product.product_name = product_data['product_name']
     if 'price' in product_data:
         product.price = product_data['price']
     
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"message": "Duplicate value not allowed"}), 409
+
     return product_schema.jsonify(product), 200
+
 
 # DELETE route -- delets product by ID  
 @app.route('/products/<int:id>', methods=['DELETE'])
@@ -246,7 +257,93 @@ def delete_product(id):
     db.session.commit()
     return jsonify({"message": f"Successfully deleted product {id}"}), 200 
 
+# ORDER ROUTES
 
+# POST /orders — Create a new order
+@app.route('/orders', methods=['POST'])
+def create_order():
+    try:
+        data = order_schema.load(request.json)
+        
+        # Validate user exists
+        user = db.session.get(User, data['user_id'])
+        if not user:
+            return jsonify({"message": "User not found"}), 404
+
+        new_order = Order(user_id=data['user_id'])
+        db.session.add(new_order)
+        db.session.commit()
+        return order_schema.jsonify(new_order), 201
+
+    except ValidationError as e:
+        return jsonify(e.messages), 400
+
+
+# PUT /orders/<order_id>/add_product/<product_id>
+@app.route('/orders/<int:order_id>/add_product/<int:product_id>', methods=['PUT'])
+def add_product_to_order(order_id, product_id):
+    order = db.session.get(Order, order_id)
+    product = db.session.get(Product, product_id)
+
+    if not order:
+        return jsonify({"message": "Order not found"}), 404
+    if not product:
+        return jsonify({"message": "Product not found"}), 404
+
+    # Prevent duplicates
+    if product in order.products:
+        return jsonify({"message": "Product already added to this order"}), 409
+
+    order.products.append(product)
+    db.session.commit()
+
+    return jsonify({"message": f"Product {product_id} added to order {order_id}"}), 200
+
+
+# DELETE /orders/<order_id>/remove_product/<product_id>
+@app.route('/orders/<int:order_id>/remove_product/<int:product_id>', methods=['DELETE'])
+def remove_product_from_order(order_id, product_id):
+    order = db.session.get(Order, order_id)
+    product = db.session.get(Product, product_id)
+
+    if not order:
+        return jsonify({"message": "Order not found"}), 404
+    if not product:
+        return jsonify({"message": "Product not found"}), 404
+
+    if product not in order.products:
+        return jsonify({"message": "Product not in this order"}), 404
+
+    order.products.remove(product)
+    db.session.commit()
+
+    return jsonify({"message": f"Product {product_id} removed from order {order_id}"}), 200
+
+
+# GET /orders/user/<user_id>
+@app.route('/orders/user/<int:user_id>', methods=['GET'])
+def get_orders_for_user(user_id):
+    user = db.session.get(User, user_id)
+
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+
+    orders = db.session.execute(
+        select(Order).where(Order.user_id == user_id)
+    ).scalars().all()
+
+    return orders_schema.jsonify(orders), 200
+
+
+# GET /orders/<order_id>/products
+@app.route('/orders/<int:order_id>/products', methods=['GET'])
+def get_products_for_order(order_id):
+    order = db.session.get(Order, order_id)
+
+    if not order:
+        return jsonify({"message": "Order not found"}), 404
+
+    return products_schema.jsonify(order.products), 200
 
 
 if __name__ == '__main__':
