@@ -126,9 +126,9 @@ def create_user():
     try:
         user_data = user_schema.load(request.json)
         new_user = User(
-            name=user_data['name'],
-            address=user_data['address'],
-            email=user_data['email']
+            name=user_data.name,
+            address=user_data.address,
+            email=user_data.email
         )
         db.session.add(new_user)
         db.session.commit()
@@ -141,31 +141,34 @@ def create_user():
     return user_schema.jsonify(new_user), 201
     
 # PUT route -- updates user by ID
-@app.route('/users/<int:id>', methods=['PUT'])
-def update_user(id):
-    user = db.session.get(User, id)
-    
+@app.route('/users/<int:user_id>', methods=['PUT'])
+def update_user(user_id):
+    # Use select() + session.execute() to get the user
+    query = select(User).where(User.id == user_id)
+    user = db.session.execute(query).scalar_one_or_none()  # returns None if not found
+
     if not user:
-        return jsonify({"message": "Invalid user id"}), 404
-    try: 
-        user_data = user_schema.load(request.json, partial=True)  # validates input only
+        return jsonify({"message": "User not found"}), 404
+
+    try:
+        user_data = user_schema.load(request.json, partial=True)
+
+        # Update fields using dot notation
+        if user_data.name:
+            user.name = user_data.name
+        if user_data.address:
+            user.address = user_data.address
+        if user_data.email:
+            user.email = user_data.email
+
+        db.session.commit()
+        return user_schema.jsonify(user), 200
+
     except ValidationError as e:
         return jsonify(e.messages), 400
-    
-    if 'name' in user_data:
-        user.name = user_data['name']
-    if 'address' in user_data:
-        user.address = user_data['address']
-    if 'email' in user_data: 
-        user.email = user_data['email']
-    
-    try:
-        db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        return jsonify({"message": "Duplicate value not allowed"}), 409
-
-    return user_schema.jsonify(user), 200
+        return jsonify({"message": "User with this email already exists"}), 409
 
     
 # DELETE route -- delets user by ID  
@@ -203,11 +206,7 @@ def get_product(id):
 @app.route('/products', methods=['POST'])
 def create_product():
     try:
-        product_data = product_schema.load(request.json)
-        new_product = Product(
-            product_name=product_data['product_name'],
-            price=product_data['price'],
-        )
+        new_product = product_schema.load(request.json) 
         db.session.add(new_product)
         db.session.commit()
     except ValidationError as e:
@@ -230,11 +229,11 @@ def update_product(id):
         product_data = product_schema.load(request.json, partial=True)
     except ValidationError as e:
         return jsonify(e.messages), 400
-    
-    if 'product_name' in product_data:
-        product.product_name = product_data['product_name']
-    if 'price' in product_data:
-        product.price = product_data['price']
+
+    if hasattr(product_data, 'product_name') and product_data.product_name:
+        product.product_name = product_data.product_name
+    if hasattr(product_data, 'price') and product_data.price is not None:
+        product.price = product_data.price
     
     try:
         db.session.commit()
@@ -263,16 +262,19 @@ def delete_product(id):
 @app.route('/orders', methods=['POST'])
 def create_order():
     try:
-        data = order_schema.load(request.json)
-        
+        # Load data as an Order instance
+        order_data: Order = order_schema.load(request.json)
+
         # Validate user exists
-        user = db.session.get(User, data['user_id'])
+        user = db.session.get(User, order_data.user_id)
         if not user:
             return jsonify({"message": "User not found"}), 404
 
-        new_order = Order(user_id=data['user_id'])
+        # Create the order
+        new_order = Order(user_id=order_data.user_id)
         db.session.add(new_order)
         db.session.commit()
+
         return order_schema.jsonify(new_order), 201
 
     except ValidationError as e:
