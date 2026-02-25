@@ -25,6 +25,8 @@ db = SQLAlchemy(model_class=Base)
 ma = Marshmallow(app)
 db.init_app(app)
 
+                                                # Tables
+
 # Association Table
 order_product = Table(
     "order_product",
@@ -44,7 +46,7 @@ class User(Base):
 
     orders: Mapped[List["Order"]] = relationship(backref="user")
 
-# Define the Order model
+# Order model
 class Order(Base):
     __tablename__ = 'orders'
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -63,7 +65,7 @@ class Product(Base):
     
     orders: Mapped[List["Order"]] = relationship("Order", secondary=order_product, back_populates="products")
 
-# Schemas
+                                            # Marshmallow Schemas
 
 class UserSchema(ma.SQLAlchemyAutoSchema):
     class Meta:
@@ -101,7 +103,7 @@ product_schema = ProductSchema()
 products_schema = ProductSchema(many=True)
 
 
-# USER ROUTES
+                                                # USER ROUTES
 
 # GET route -- retrieves all users
 @app.route('/users', methods=['GET'])
@@ -183,7 +185,7 @@ def delete_user(id):
     db.session.commit()
     return jsonify({"message": f"Successfully deleted user {id}"}), 200 
 
-# PRODUCT ROUTES
+                                                        # PRODUCT ROUTES
 
 # GET route -- retrieves all products
 @app.route('/products', methods=['GET'])
@@ -256,7 +258,7 @@ def delete_product(id):
     db.session.commit()
     return jsonify({"message": f"Successfully deleted product {id}"}), 200 
 
-# ORDER ROUTES
+                                                # ORDER ROUTES
 
 # POST /orders — Create a new order
 @app.route('/orders', methods=['POST'])
@@ -281,7 +283,7 @@ def create_order():
         return jsonify(e.messages), 400
 
 
-# PUT /orders/<order_id>/add_product/<product_id>
+# PUT Add Product to Exisiting Order
 @app.route('/orders/<int:order_id>/add_product/<int:product_id>', methods=['PUT'])
 def add_product_to_order(order_id, product_id):
     order = db.session.get(Order, order_id)
@@ -302,7 +304,7 @@ def add_product_to_order(order_id, product_id):
     return jsonify({"message": f"Product {product_id} added to order {order_id}"}), 200
 
 
-# DELETE /orders/<order_id>/remove_product/<product_id>
+# DELETE product
 @app.route('/orders/<int:order_id>/remove_product/<int:product_id>', methods=['DELETE'])
 def remove_product_from_order(order_id, product_id):
     order = db.session.get(Order, order_id)
@@ -322,7 +324,7 @@ def remove_product_from_order(order_id, product_id):
     return jsonify({"message": f"Product {product_id} removed from order {order_id}"}), 200
 
 
-# GET /orders/user/<user_id>
+# GET Order to speoific user Id
 @app.route('/orders/user/<int:user_id>', methods=['GET'])
 def get_orders_for_user(user_id):
     user = db.session.get(User, user_id)
@@ -337,7 +339,7 @@ def get_orders_for_user(user_id):
     return orders_schema.jsonify(orders), 200
 
 
-# GET /orders/<order_id>/products
+# GET all products based on Order Id
 @app.route('/orders/<int:order_id>/products', methods=['GET'])
 def get_products_for_order(order_id):
     order = db.session.get(Order, order_id)
